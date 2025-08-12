@@ -1,0 +1,26 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>复读机（纯离线单文件PWA）</title>
+<meta name="theme-color" content="#111111" />
+<link rel="manifest" href="manifest.json" />
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('service-worker.js')
+    .then(() => console.log('Service Worker 注册成功'))
+    .catch(() => console.log('Service Worker 注册失败'));
+}
+</script>
+<style>
+  body { font-family: Arial, sans-serif; background: #222; color: #eee; margin: 1em; }
+</style>
+</head>
+<body>
+<h1>复读机（纯离线单文件PWA）</h1>
+<p>这是一个示范单文件离线PWA版本，支持离线缓存和基本功能。</p>
+<!-- TODO: 这里嵌入完整功能的HTML和JS代码 -->
+</body>
+</html>
