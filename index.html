@@ -4,23 +4,180 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>复读机（纯离线单文件PWA）</title>
-<meta name="theme-color" content="#111111" />
-<link rel="manifest" href="manifest.json" />
-<script>
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('service-worker.js')
-    .then(() => console.log('Service Worker 注册成功'))
-    .catch(() => console.log('Service Worker 注册失败'));
-}
-</script>
+<title>网页版复读机 - 支持TXT字幕同步</title>
 <style>
   body { font-family: Arial, sans-serif; background: #222; color: #eee; margin: 1em; }
+  #waveform { width: 100%; height: 60px; background: #333; margin: 1em 0; }
+  #subtitle { margin-top: 1em; font-size: 1.2em; min-height: 2em; }
+  button { margin: 0.2em; padding: 0.5em 1em; font-size: 1em; }
+  input[type="file"] { margin: 0.5em 0; }
+  #speed { width: 60px; }
 </style>
 </head>
 <body>
-<h1>复读机（纯离线单文件PWA）</h1>
-<p>这是一个示范单文件离线PWA版本，支持离线缓存和基本功能。</p>
-<!-- TODO: 这里嵌入完整功能的HTML和JS代码 -->
+
+<h1>网页版复读机（支持TXT字幕同步）</h1>
+
+<label>选择音频文件（mp3/wav等）:<br>
+<input type="file" id="audioFile" accept="audio/*" /></label><br>
+
+<label>上传字幕文件（TXT格式，按句断句）:<br>
+<input type="file" id="subtitleFile" accept=".txt" /></label>
+
+<div>
+  <button id="playBtn">播放</button>
+  <button id="pauseBtn">暂停</button>
+  <button id="loopBtn">循环: 关闭</button>
+  <label>速度:
+    <select id="speed">
+      <option value="0.75">0.75x</option>
+      <option value="1" selected>1x</option>
+      <option value="1.25">1.25x</option>
+      <option value="1.5">1.5x</option>
+      <option value="2">2x</option>
+    </select>
+  </label>
+</div>
+
+<canvas id="waveform"></canvas>
+<div id="subtitle"></div>
+
+<script>
+// 音频与播放控制
+let audioCtx, audioSource, analyser, dataArray, animationId;
+const canvas = document.getElementById('waveform');
+const ctx = canvas.getContext('2d');
+const subtitleDiv = document.getElementById('subtitle');
+
+let audio = new Audio();
+audio.crossOrigin = "anonymous";
+
+const playBtn = document.getElementById('playBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+const loopBtn = document.getElementById('loopBtn');
+const speedSelect = document.getElementById('speed');
+
+let loopOn = false;
+let subtitles = [];
+let currentIndex = 0;
+
+function resizeCanvas(){
+  canvas.width = canvas.clientWidth;
+  canvas.height = canvas.clientHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+function drawWaveform(){
+  animationId = requestAnimationFrame(drawWaveform);
+  analyser.getByteTimeDomainData(dataArray);
+
+  ctx.fillStyle = '#333';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#0f0';
+  ctx.beginPath();
+
+  const sliceWidth = canvas.width / dataArray.length;
+  let x = 0;
+  for(let i=0; i<dataArray.length; i++){
+    let v = dataArray[i] / 128.0;
+    let y = v * canvas.height/2;
+    if(i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+    x += sliceWidth;
+  }
+  ctx.lineTo(canvas.width, canvas.height/2);
+  ctx.stroke();
+}
+
+// 处理字幕TXT文件，简单按句号等断句
+function parseSubtitle(txt){
+  // 按句号、问号、感叹号断句，分成数组
+  let s = txt.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  let parts = s.split(/(?<=[。？！!?])/);
+  // 去除空元素和空格
+  return parts.map(p => p.trim()).filter(p => p.length>0);
+}
+
+// 同步字幕显示
+function updateSubtitle(){
+  if(subtitles.length === 0) {
+    subtitleDiv.textContent = '';
+    return;
+  }
+  let t = audio.currentTime;
+  // 简单规则：字幕每句平均时长 = 音频总时长 / 字幕句数
+  let segmentDuration = audio.duration / subtitles.length;
+  let idx = Math.floor(t / segmentDuration);
+  if(idx !== currentIndex && idx < subtitles.length){
+    currentIndex = idx;
+    subtitleDiv.textContent = subtitles[idx];
+  }
+  if(loopOn && audio.currentTime >= audio.duration - 0.1){
+    audio.currentTime = 0;
+    audio.play();
+    currentIndex = 0;
+  }
+  if(!loopOn && audio.currentTime >= audio.duration - 0.1){
+    currentIndex = subtitles.length;
+    subtitleDiv.textContent = '';
+  }
+  requestAnimationFrame(updateSubtitle);
+}
+
+document.getElementById('audioFile').addEventListener('change', e=>{
+  const file = e.target.files[0];
+  if(file){
+    const url = URL.createObjectURL(file);
+    audio.src = url;
+    currentIndex = 0;
+    subtitles = [];
+    subtitleDiv.textContent = '';
+    if(audioCtx) audioCtx.close();
+    audioCtx = new AudioContext();
+    audioSource = audioCtx.createMediaElementSource(audio);
+    analyser = audioCtx.createAnalyser();
+    audioSource.connect(analyser);
+    analyser.connect(audioCtx.destination);
+    analyser.fftSize = 256;
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
+    drawWaveform();
+  }
+});
+
+document.getElementById('subtitleFile').addEventListener('change', e=>{
+  const file = e.target.files[0];
+  if(file){
+    const reader = new FileReader();
+    reader.onload = function(evt){
+      subtitles = parseSubtitle(evt.target.result);
+      subtitleDiv.textContent = '';
+      currentIndex = 0;
+    };
+    reader.readAsText(file, 'utf-8');
+  }
+});
+
+playBtn.onclick = () => {
+  if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  audio.play();
+  updateSubtitle();
+};
+
+pauseBtn.onclick = () => audio.pause();
+
+loopBtn.onclick = () => {
+  loopOn = !loopOn;
+  loopBtn.textContent = '循环: ' + (loopOn ? '开启' : '关闭');
+};
+
+speedSelect.onchange = e => {
+  audio.playbackRate = parseFloat(e.target.value);
+};
+
+</script>
+
 </body>
 </html>
